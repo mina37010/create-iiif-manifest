@@ -1,5 +1,58 @@
-<!-- BEGIN:nextjs-agent-rules -->
-# This is NOT the Next.js you know
+# AGENTS.md
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
+## 1. 目的
+
+このファイルは AI エージェント専用の指示書です。
+Devin が作業を始める前に参照し、正確に作業できるようにプロジェクトのコンテキストやルールを提供します。
+
+## 2. セットアップコマンド
+
+- 依存関係のインストール: `npm install`
+- 開発サーバー起動: `npm run dev`
+- テスト実行: `npm test`
+- 本番ビルド: `npm run build`
+
+## 3. コードスタイル
+
+- TypeScript strict モードを使用
+- React は関数コンポーネント優先
+- ESLint と Prettier の設定に従う
+- コミットメッセージは Conventional Commit 形式
+
+## 4. テストガイドライン
+
+- 新規関数にはユニットテストを作成
+- テストフレームワークは Jest
+- カバレッジ >80% を目標
+- コミット前に必ずテストを実行
+
+## 5. プロジェクト構造
+
+- `/app` - メインアプリコード
+- `/tests` - テストコード
+- `/docs` - ドキュメント
+- `/public` - 静的アセット
+- README.md は人間向けで、自動参照しない
+
+## 6. 開発ワークフロー
+
+- `main` ブランチから機能ブランチを作成
+- プルリクエストでコードレビュー
+- マージ前にコミットを squash
+- 新規機能にはドキュメントを更新
+
+## 7. プルリクエストのルール
+
+- タイトル形式: [<project_name>] <タイトル>
+- **必須** レビュワーからのコメントは、依頼者に確認して指示があるまで作業しないこと
+- 必ずDraft PRで作成すること
+- Assigneesは、実装依頼をした人を設定する
+
+## 8. 注意事項
+
+- PRにコメントがあっても、指示があるまで作業しないこと
+- AGENTS.md は専用の指示書としてコーディング前に必ず参照
+- `.rules`、`.mdc`、`.cursorrules`、`.windsurf` なども自動参照される
+- 可能な限り詳細で明確な指示を記載することで、Devin の作業効率が向上
+
 <!-- END:nextjs-agent-rules -->
