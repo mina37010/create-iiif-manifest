@@ -35,6 +35,9 @@ type CanvasInput = {
   canvasNo: number;
   label: LocalizedValues;
   images: CanvasImageInput[];
+  manualSize: boolean;
+  manualWidth?: number;
+  manualHeight?: number;
 };
 
 type ThumbnailMode = 'registered' | 'custom';
@@ -115,6 +118,7 @@ function createCanvas(canvasNo: number): CanvasInput {
     canvasNo,
     label: createEmptyLocalizedValues(),
     images: [createCanvasImage()],
+    manualSize: false,
   };
 }
 
@@ -122,6 +126,15 @@ function normalizeBaseUri(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return '';
   return trimmed.endsWith('/') ? trimmed.slice(0, -1) : trimmed;
+}
+
+function getCanvasComputedSize(canvas: CanvasInput) {
+  const detectedImages = canvas.images.map((image) => image.detected).filter((v): v is ImageSource => Boolean(v));
+  if (detectedImages.length === 0) return null;
+  return {
+    width: Math.max(...detectedImages.map((img) => img.width)),
+    height: Math.max(...detectedImages.map((img) => img.height)),
+  };
 }
 
 function joinUrl(base: string, path: string) {
@@ -241,8 +254,22 @@ function generateManifest(baseUri: string, manifestLabel: LocalizedValues, canva
         throw new Error(`Canvas ${canvas.canvasNo} に有効な画像がありません。`);
       }
 
-      const width = Math.max(...detectedImages.map((img) => img.width));
-      const height = Math.max(...detectedImages.map((img) => img.height));
+      const computedSize = getCanvasComputedSize(canvas);
+      if (!computedSize) {
+        throw new Error(`Canvas ${canvas.canvasNo} に有効な画像サイズがありません。`);
+      }
+
+      const width = canvas.manualSize
+        ? canvas.manualWidth ?? computedSize.width
+        : computedSize.width;
+      const height = canvas.manualSize
+        ? canvas.manualHeight ?? computedSize.height
+        : computedSize.height;
+
+      if (canvas.manualSize && (!width || !height)) {
+        throw new Error(`Canvas ${canvas.canvasNo} の手動サイズを正しく入力してください。`);
+      }
+
       const canvasId = joinUrl(normalizedBase, `canvas/p${canvas.canvasNo}`);
       const pageId = joinUrl(normalizedBase, `page/p${canvas.canvasNo}/1`);
 
@@ -335,6 +362,7 @@ function manifestCanvasToInput(canvas: ManifestCanvas, index: number): CanvasInp
         loading: false,
       })),
     ),
+    manualSize: false,
   };
 }
 
@@ -740,6 +768,69 @@ export default function Page() {
                 label={canvas.label}
                 onChange={(next) => updateCanvas(canvas.id, (current) => ({ ...current, label: next }))}
               />
+
+              <div className="mt-4 rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-700">
+                <div className="mb-3 flex items-center gap-3">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={canvas.manualSize}
+                      onChange={(e) => {
+                        const computed = getCanvasComputedSize(canvas);
+                        updateCanvas(canvas.id, (current) => ({
+                          ...current,
+                          manualSize: e.target.checked,
+                          manualWidth: e.target.checked
+                            ? current.manualWidth ?? computed?.width
+                            : current.manualWidth,
+                          manualHeight: e.target.checked
+                            ? current.manualHeight ?? computed?.height
+                            : current.manualHeight,
+                        }));
+                      }}
+                      className="h-4 w-4 rounded border-neutral-300 text-neutral-600"
+                    />
+                    手動サイズを有効にする
+                  </label>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span>幅</span>
+                    <input
+                      type="number"
+                      value={canvas.manualWidth ?? getCanvasComputedSize(canvas)?.width ?? ''}
+                      onChange={(e) =>
+                        updateCanvas(canvas.id, (current) => ({
+                          ...current,
+                            manualWidth: e.target.value === '' ? undefined : Number(e.target.value),
+                        }))
+                      }
+                      disabled={!canvas.manualSize}
+                      className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm disabled:bg-neutral-100"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span>高さ</span>
+                    <input
+                      type="number"
+                      value={canvas.manualHeight ?? getCanvasComputedSize(canvas)?.height ?? ''}
+                      onChange={(e) =>
+                        updateCanvas(canvas.id, (current) => ({
+                          ...current,
+                            manualHeight: e.target.value === '' ? undefined : Number(e.target.value),
+                        }))
+                      }
+                      disabled={!canvas.manualSize}
+                      className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm disabled:bg-neutral-100"
+                    />
+                  </label>
+                </div>
+                {!canvas.manualSize ? (
+                  <div className="mt-3 text-xs text-neutral-500">
+                    自動検出サイズ: {getCanvasComputedSize(canvas)?.width ?? '-'} × {getCanvasComputedSize(canvas)?.height ?? '-'}
+                  </div>
+                ) : null}
+              </div>
 
               <div className="mt-4 space-y-3">
                 {canvas.images.map((image, imageIndex) => (
