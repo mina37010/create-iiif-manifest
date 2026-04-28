@@ -212,7 +212,7 @@ async function detectIiifImage(imageUrl: string): Promise<ImageSource> {
           {
             id: serviceId,
             type: isV3 ? 'ImageService3' : 'ImageService2',
-            profile: typeof json.profile === 'string' ? json.profile : undefined,
+            profile: "level1",
           },
         ],
       };
@@ -421,19 +421,16 @@ function parseManifestImport(input: unknown): {
   };
 }
 
-function PreviewPane({ manifest }: { manifest?: Manifest }) {
-  const [currentCanvasIndex, setCurrentCanvasIndex] = useState(0);
-
+function PreviewPane({ manifest, currentCanvasIndex, onCanvasIndexChange }: { manifest?: Manifest; currentCanvasIndex: number; onCanvasIndexChange: (index: number) => void }) {
   const currentCanvas = manifest?.items[currentCanvasIndex];
-  const firstAnnotation = currentCanvas?.items[0]?.items[0];
-  const imageUrl = firstAnnotation?.body.id;
+  const annotations = currentCanvas?.items[0]?.items ?? [];
 
   const goToPrevious = () => {
-    setCurrentCanvasIndex((prev) => Math.max(0, prev - 1));
+    onCanvasIndexChange(Math.max(0, currentCanvasIndex - 1));
   };
 
   const goToNext = () => {
-    setCurrentCanvasIndex((prev) => Math.min((manifest?.items.length ?? 1) - 1, prev + 1));
+    onCanvasIndexChange(Math.min((manifest?.items.length ?? 1) - 1, currentCanvasIndex + 1));
   };
 
   return (
@@ -464,10 +461,22 @@ function PreviewPane({ manifest }: { manifest?: Manifest }) {
           </div>
         ) : null}
       </div>
-      <div className="flex min-h-[420px] items-center justify-center rounded-xl border border-dashed border-neutral-300 bg-neutral-50">
-        {imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={imageUrl} alt={`Canvas ${currentCanvas?.label?.ja?.[0] || currentCanvas?.label?.en?.[0] || 'preview'}`} className="max-h-[400px] max-w-full object-contain" />
+      <div className="relative flex min-h-[420px] items-center justify-center rounded-xl border border-dashed border-neutral-300 bg-neutral-50 overflow-hidden">
+        {annotations.length > 0 ? (
+          <div className="relative w-full h-full flex items-center justify-center">
+            {annotations.map((annotation, index) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={annotation.id}
+                src={annotation.body.id}
+                alt={`Layer ${index + 1}`}
+                className="absolute max-h-[400px] max-w-full object-contain"
+                style={{
+                  zIndex: index,
+                }}
+              />
+            ))}
+          </div>
         ) : (
           <div className="text-neutral-400">画像を登録するとここに表示されます</div>
         )}
@@ -578,13 +587,17 @@ function LocalizedInput({
 
 export default function Page() {
   const [baseUri, setBaseUri] = useState('https://example.org/iiif/book1/');
-  const [manifestLabel, setManifestLabel] = useState<LocalizedValues>({ en: ['Simple Manifest - Book'], ja: ['シンプルマニフェスト'] });
+  const [manifestLabel, setManifestLabel] = useState<LocalizedValues>({ja: ['シンプルマニフェスト'] });
   const [canvases, setCanvases] = useState<CanvasInput[]>([createCanvas(1)]);
   const [thumbnailChoice, setThumbnailChoice] = useState<ThumbnailChoice>({ mode: 'registered' });
   const [manifestJson, setManifestJson] = useState('');
   const [error, setError] = useState<string>();
   const [importText, setImportText] = useState('');
   const [importError, setImportError] = useState<string>();
+  const [copySuccess, setCopySuccess] = useState(false);
+  const [downloadSuccess, setDownloadSuccess] = useState(false);
+  const [importSuccess, setImportSuccess] = useState(false);
+  const [currentCanvasIndex, setCurrentCanvasIndex] = useState(0);
 
   const registeredImages = useMemo(
     () => canvases.flatMap((canvas) => canvas.images.map((image) => ({ canvasNo: canvas.canvasNo, image }))).filter((entry) => entry.image.detected),
@@ -616,15 +629,63 @@ export default function Page() {
   };
 
   const removeCanvas = (canvasId: string) => {
+    const index = canvases.findIndex((c) => c.id === canvasId);
     setCanvases((prev) => {
       const filtered = prev.filter((canvas) => canvas.id !== canvasId);
       // Reassign canvasNo
-      return filtered.map((canvas, index) => ({ ...canvas, canvasNo: index + 1 }));
+      return filtered.map((canvas, idx) => ({ ...canvas, canvasNo: idx + 1 }));
     });
+    // Adjust currentCanvasIndex if necessary
+    if (index < currentCanvasIndex) {
+      setCurrentCanvasIndex(currentCanvasIndex - 1);
+    } else if (index === currentCanvasIndex && currentCanvasIndex >= canvases.length - 1) {
+      setCurrentCanvasIndex(Math.max(0, canvases.length - 2));
+    }
   };
 
   const addCanvas = () => {
     setCanvases((prev) => [...prev, createCanvas(prev.length + 1)]);
+    setCurrentCanvasIndex((prev) => prev + 1);
+  };
+
+  const moveCanvasUp = (canvasId: string) => {
+    setCanvases((prev) => {
+      const index = prev.findIndex((c) => c.id === canvasId);
+      if (index <= 0) return prev;
+      const next = [...prev];
+      [next[index - 1], next[index]] = [next[index], next[index - 1]];
+      return next.map((canvas, idx) => ({ ...canvas, canvasNo: idx + 1 }));
+    });
+  };
+
+  const moveCanvasDown = (canvasId: string) => {
+    setCanvases((prev) => {
+      const index = prev.findIndex((c) => c.id === canvasId);
+      if (index >= prev.length - 1) return prev;
+      const next = [...prev];
+      [next[index], next[index + 1]] = [next[index + 1], next[index]];
+      return next.map((canvas, idx) => ({ ...canvas, canvasNo: idx + 1 }));
+    });
+  };
+
+  const moveImageUp = (canvasId: string, imageId: string) => {
+    updateCanvas(canvasId, (canvas) => {
+      const images = [...canvas.images];
+      const index = images.findIndex((img) => img.id === imageId);
+      if (index <= 0) return canvas;
+      [images[index - 1], images[index]] = [images[index], images[index - 1]];
+      return { ...canvas, images };
+    });
+  };
+
+  const moveImageDown = (canvasId: string, imageId: string) => {
+    updateCanvas(canvasId, (canvas) => {
+      const images = [...canvas.images];
+      const index = images.findIndex((img) => img.id === imageId);
+      if (index >= images.length - 1) return canvas;
+      [images[index], images[index + 1]] = [images[index + 1], images[index]];
+      return { ...canvas, images };
+    });
   };
 
   const detectImage = async (canvasId: string, imageId: string) => {
@@ -662,11 +723,15 @@ export default function Page() {
     a.download = 'manifest.json';
     a.click();
     URL.revokeObjectURL(url);
+    setDownloadSuccess(true);
+    setTimeout(() => setDownloadSuccess(false), 2000);
   };
 
   const copyManifest = async () => {
     if (!manifestJson) return;
     await navigator.clipboard.writeText(manifestJson);
+    setCopySuccess(true);
+    setTimeout(() => setCopySuccess(false), 2000);
   };
 
   const importManifestJson = async (jsonText: string) => {
@@ -677,9 +742,13 @@ export default function Page() {
       setCanvases(result.canvases);
       setThumbnailChoice(result.thumbnailChoice);
       if (result.baseUri) setBaseUri(result.baseUri);
+      setCurrentCanvasIndex(0);
       setImportError(undefined);
+      setImportSuccess(true);
+      setTimeout(() => setImportSuccess(false), 2000);
     } catch (e) {
       setImportError(e instanceof Error ? e.message : '読み込みに失敗しました。');
+      setImportSuccess(false);
     }
   };
 
@@ -700,10 +769,12 @@ export default function Page() {
       <div className="mx-auto grid max-w-7xl gap-6 lg:grid-cols-[1fr_520px] h-full">
         <div className="space-y-6 overflow-y-auto">
           <h1 className="text-2xl font-semibold">IIIF Manifest生成ページ</h1>
-          <PreviewPane manifest={manifestPreview} />
+          <PreviewPane manifest={manifestPreview} currentCanvasIndex={currentCanvasIndex} onCanvasIndexChange={setCurrentCanvasIndex} />
           <div className="rounded-2xl border border-neutral-300 bg-white p-4 shadow-sm">
             <div className="mb-3 text-sm font-medium">生成結果</div>
             {error ? <div className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
+            {copySuccess ? <div className="mb-3 rounded-lg bg-green-50 p-3 text-sm text-green-700">コピーしました</div> : null}
+            {downloadSuccess ? <div className="mb-3 rounded-lg bg-green-50 p-3 text-sm text-green-700">ダウンロードしました</div> : null}
             <div className="mb-3 flex gap-2">
               <button type="button" onClick={copyManifest} className="rounded-lg border border-neutral-300 px-4 py-2 text-sm">
                 Copy
@@ -735,6 +806,7 @@ export default function Page() {
               </button>
             </div>
             {importError ? <div className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{importError}</div> : null}
+            {importSuccess ? <div className="mb-3 rounded-lg bg-green-50 p-3 text-sm text-green-700">読み込みました</div> : null}
             <label className="mb-2 block text-sm font-medium">ベースURI</label>
             <input
               value={baseUri}
@@ -745,20 +817,38 @@ export default function Page() {
             <LocalizedInput title="Manifest Label" label={manifestLabel} onChange={setManifestLabel} />
           </div>
 
-          {canvases.map((canvas) => (
-            <section key={canvas.id} className="rounded-2xl border border-neutral-300 bg-white p-4 shadow-sm">
+          {canvases.map((canvas, canvasIndex) => (
+            <section key={canvas.id} className="rounded-2xl border border-neutral-300 bg-white p-4 shadow-sm cursor-pointer" onClick={() => setCurrentCanvasIndex(canvasIndex)}>
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="text-lg font-medium">キャンバス {canvas.canvasNo}</h2>
                 <div className="flex items-center gap-2">
                   <div className="text-xs text-neutral-500">ID: /canvas/p{canvas.canvasNo}</div>
                   {canvases.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeCanvas(canvas.id)}
-                      className="rounded-lg border border-red-300 px-3 text-sm text-red-600 hover:border-red-400 hover:text-red-700"
-                    >
-                      −
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => moveCanvasUp(canvas.id)}
+                        disabled={canvasIndex === 0}
+                        className="rounded-lg border border-neutral-300 px-2 py-1 text-sm disabled:opacity-50"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveCanvasDown(canvas.id)}
+                        disabled={canvasIndex === canvases.length - 1}
+                        className="rounded-lg border border-neutral-300 px-2 py-1 text-sm disabled:opacity-50"
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeCanvas(canvas.id)}
+                        className="rounded-lg border border-red-300 px-3 text-sm text-red-600 hover:border-red-400 hover:text-red-700"
+                      >
+                        −
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -835,7 +925,29 @@ export default function Page() {
               <div className="mt-4 space-y-3">
                 {canvas.images.map((image, imageIndex) => (
                   <div key={image.id} className="rounded-xl border border-neutral-200 p-3">
-                    <div className="mb-2 text-sm font-medium">画像 {imageIndex + 1}</div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <div className="text-sm font-medium">画像 {imageIndex + 1}</div>
+                      {canvas.images.length > 1 && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => moveImageUp(canvas.id, image.id)}
+                            disabled={imageIndex === 0}
+                            className="rounded-lg border border-neutral-300 px-2 py-1 text-sm disabled:opacity-50"
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveImageDown(canvas.id, image.id)}
+                            disabled={imageIndex === canvas.images.length - 1}
+                            className="rounded-lg border border-neutral-300 px-2 py-1 text-sm disabled:opacity-50"
+                          >
+                            ↓
+                          </button>
+                        </div>
+                      )}
+                    </div>
                     <input
                       value={image.imageUrl}
                       onChange={(e) =>
@@ -921,25 +1033,44 @@ export default function Page() {
             </div>
 
             {thumbnailChoice.mode === 'registered' ? (
-              <select
-                value={thumbnailChoice.selectedImageId ?? ''}
-                onChange={(e) => setThumbnailChoice({ mode: 'registered', selectedImageId: e.target.value })}
-                className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-              >
-                <option value="">選択してください</option>
-                {registeredImages.map(({ canvasNo, image }, index) => (
-                  <option key={image.id} value={image.id}>
-                    Canvas {canvasNo} / 画像 {index + 1} / {image.detected?.id}
-                  </option>
-                ))}
-              </select>
+              <>
+                <select
+                  value={thumbnailChoice.selectedImageId ?? ''}
+                  onChange={(e) => setThumbnailChoice({ mode: 'registered', selectedImageId: e.target.value })}
+                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                >
+                  <option value="">選択してください</option>
+                  {registeredImages.map(({ canvasNo, image }, index) => (
+                    <option key={image.id} value={image.id}>
+                      Canvas {canvasNo} / 画像 {index + 1} / {image.detected?.id}
+                    </option>
+                  ))}
+                </select>
+                {thumbnailChoice.selectedImageId && (() => {
+                  const selected = registeredImages.find(({ image }) => image.id === thumbnailChoice.selectedImageId)?.image;
+                  return selected?.imageUrl ? (
+                    <div className="mt-3 rounded-lg border border-neutral-200 bg-neutral-50 p-2">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={selected.imageUrl} alt="thumbnail preview" className="h-20 w-full rounded object-contain" />
+                    </div>
+                  ) : null;
+                })()}
+              </>
             ) : (
-              <input
-                value={thumbnailChoice.customUrl ?? ''}
-                onChange={(e) => setThumbnailChoice({ mode: 'custom', customUrl: e.target.value })}
-                placeholder="thumbnail URL"
-                className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-              />
+              <>
+                <input
+                  value={thumbnailChoice.customUrl ?? ''}
+                  onChange={(e) => setThumbnailChoice({ mode: 'custom', customUrl: e.target.value })}
+                  placeholder="thumbnail URL"
+                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                />
+                {thumbnailChoice.customUrl?.trim() && (
+                  <div className="mt-3 rounded-lg border border-neutral-200 bg-neutral-50 p-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={thumbnailChoice.customUrl} alt="thumbnail preview" className="h-20 w-full rounded object-contain" onError={() => {}} />
+                  </div>
+                )}
+              </>
             )}
           </section>
         </div>
